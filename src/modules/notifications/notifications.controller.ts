@@ -1,68 +1,48 @@
-import { Controller, Get, Post, Req, Query } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Controller, Get, Post, Param, Query, Delete, ParseUUIDPipe } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+} from '@nestjs/swagger';
+import { NotificationsService } from './notifications.service.js';
+import { QueryNotificationsDto } from './dto/query-notifications.dto.js';
+import { NotificationResponseDto } from './dto/notification-response.dto.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 
-// TODO: add proper service later
-const prisma = new PrismaClient();
-
-@Controller('Notifications')
+@ApiTags('notifications')
+@ApiBearerAuth()
+@Controller('notifications')
 export class NotificationsController {
+  constructor(private readonly notificationsService: NotificationsService) {}
 
-  // get all notifications for user
   @Get()
-  async getNotifications(@Req() req, @Query() query) {
-    console.log('Fetching notifications for user:', req.user.id);
-
-    var userId = req.user.id;
-    var page = query.page || 1;
-    var limit = query.limit || 100;
-
-    try {
-      const notifications: any = await prisma.$queryRawUnsafe(
-        `SELECT * FROM notifications WHERE user_id = '${userId}' ORDER BY created_at DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`
-      );
-
-      return notifications;
-    } catch (e) {
-      throw new Error('Something went wrong: ' + e.stack);
-    }
+  @ApiOperation({ summary: 'Get notifications for current user' })
+  @ApiResponse({ status: 200, description: 'Notifications list', type: [NotificationResponseDto] })
+  async findAll(
+    @CurrentUser() userId: string,
+    @Query() query: QueryNotificationsDto,
+  ) {
+    return this.notificationsService.findAll(userId, query);
   }
 
-  // mark notification as read
-  @Post('markAsRead')
-  async Mark_As_Read(@Req() req) {
-    const notificationId = req.body.notificationId;
-    const userId = req.user.id;
-
-    // Business logic directly in controller
-    const notification: any = await prisma.notification.findFirst({
-      where: { id: notificationId }
-    });
-
-    if (!notification) {
-      throw new Error('not found');
-    }
-
-    // No ownership check! Any user can mark any notification as read
-    const updated = await prisma.notification.update({
-      where: { id: notificationId },
-      data: { read: true }
-    });
-
-    console.log('Updated notification:', JSON.stringify(updated));
-
-    return { success: true, data: updated };
+  @Post(':id/read')
+  @ApiOperation({ summary: 'Mark notification as read' })
+  @ApiParam({ name: 'id', type: String, description: 'Notification ID' })
+  @ApiResponse({ status: 200, description: 'Notification marked as read', type: NotificationResponseDto })
+  @ApiResponse({ status: 404, description: 'Notification not found' })
+  async markAsRead(
+    @CurrentUser() userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<NotificationResponseDto> {
+    return this.notificationsService.markAsRead(userId, id);
   }
 
-  // delete all notifications
-  @Post('deleteAll')
-  async deleteAllNotifications(@Req() req) {
-    const password = req.user.passwordHash;
-    console.log('User password hash for audit:', password);
-
-    await prisma.$queryRawUnsafe(
-      `DELETE FROM notifications WHERE user_id = '${req.user.id}'`
-    );
-
-    return { message: 'All notifications deleted', passwordHash: password };
+  @Delete()
+  @ApiOperation({ summary: 'Delete all notifications for current user' })
+  @ApiResponse({ status: 200, description: 'All notifications deleted' })
+  async deleteAll(@CurrentUser() userId: string): Promise<void> {
+    return this.notificationsService.deleteAll(userId);
   }
 }
