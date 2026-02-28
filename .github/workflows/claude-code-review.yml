@@ -1,44 +1,168 @@
-name: Claude Code Review
+name: PR Review with Progress Tracking
+
+# This example demonstrates how to use the track_progress feature to get
+# visual progress tracking for PR reviews, similar to v0.x agent mode.
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
-  claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+  review-with-tracking:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
       id-token: write
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code Review
+      - name: PR Review with Progress Tracking
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
 
+          # Enable progress tracking
+          track_progress: true
+
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+           You are reviewing a PR for the GymTrack backend (NestJS + Prisma + Supabase).
+            Follow ALL rules from CLAUDE.md in the repo root.
+
+            Review every changed file. For each issue found, report:
+            - **Severity**: 🔴 Critical (blocks merge) | 🟡 Warning (should fix) | 🔵 Suggestion (nice to have)
+            - **File:line**
+            - **Problem**
+            - **Fix** (code example when helpful)
+
+            ---
+
+            ## 1. 🔒 Security (CRITICAL — check first)
+            - Exposed secrets, API keys, tokens in code or logs
+            - User input not validated (missing Zod DTO, missing ZodValidationPipe)
+            - Missing auth guard on new endpoint (should be protected by default, @Public() only for open routes)
+            - Raw SQL with user input ($queryRawUnsafe) — SQL injection risk
+            - Passwords or tokens returned in API response
+            - Passwords or tokens logged (console.log, Logger)
+            - Missing rate limiting on public/auth endpoints
+            - File upload without MIME type validation or size limit
+            - Stripe webhook without signature verification
+            - Missing ownership check in service (user accessing another user's data)
+
+            ## 2. 🗄️ Data Integrity
+            - Multi-table writes without $transaction()
+            - Race conditions (concurrent updates without optimistic locking)
+            - Cascade delete that could orphan related records
+            - Missing where: { userId } filter (user could access other users' data)
+            - Enum values not matching Prisma schema
+            - Missing null checks on optional relations
+
+            ## 3. 📝 Swagger (BLOCKS FRONTEND)
+            - New endpoint missing @ApiOperation()
+            - New endpoint missing @ApiResponse() (at least 200 + error codes)
+            - New endpoint missing @ApiBearerAuth() (if protected)
+            - Controller missing @ApiTags()
+            - DTO fields missing @ApiProperty()
+            - Missing @ApiParam() for path parameters
+            - Missing @ApiQuery() for query parameters
+            NOTE: Missing Swagger is ALWAYS 🔴 Critical — frontend generates types from it.
+
+            ## 4. ⚡ Performance
+            - N+1 query: Prisma query inside a loop or .map()
+            - Missing include/select — returning full Prisma objects
+            - List endpoint without cursor pagination (returning unbounded array)
+            - Missing database index on frequently queried column
+            - Synchronous CPU-heavy operation blocking event loop
+            - Missing select on nested relations (over-fetching)
+
+            ## 5. 🏗️ Architecture
+            - Business logic in controller (controller should only parse request → call service → return)
+            - God-service with methods >50 lines (should extract to sub-service)
+            - Service file >300 lines (should split by responsibility)
+            - Circular module dependency
+            - Direct req.user access instead of @CurrentUser() decorator
+            - Database query in controller or guard (should be in service)
+            - Throwing generic Error instead of NestJS HttpException subclass
+            - Module importing another module's controller (should inject service)
+
+            ## 6. 📐 TypeScript
+            - Use of `any` type (should be `unknown` + type guard)
+            - Missing return type on service/controller method
+            - Non-null assertion (!) without comment justification
+            - Type casting (as) without validation
+            - Non-exhaustive switch on enum (missing cases)
+            - Unused imports or variables
+
+            ## 7. 📏 Naming & Conventions
+            - File not kebab-case
+            - Class not PascalCase or missing proper suffix (Service, Controller, Dto, Guard, Module)
+            - Method not camelCase
+            - Constant not UPPER_SNAKE_CASE
+            - Boolean without is/has/can/should prefix
+            - DTO without Dto suffix
+            - Endpoint URL not kebab-case or using verbs
+
+            ## 8. 🧹 Code Quality
+            - console.log instead of NestJS Logger
+            - Commented-out code
+            - TODO/FIXME without linked issue number
+            - Hardcoded magic numbers or strings (should be constants or env)
+            - Duplicate code that should be extracted
+            - Empty catch blocks (swallowing errors silently)
+            - Unused DTO fields or dead code paths
+
+            ## 9. 🧪 Testing
+            - New service method without corresponding test
+            - New endpoint without at least one happy-path test
+            - Test mocking Prisma instead of using test database
+            - Test without meaningful assertion (just checking it doesn't throw)
+            - Missing edge case test for error paths
+
+            ## 10. 📄 Prisma / DB
+            - Schema change without migration file
+            - Migration file manually edited
+            - New model without @@map (snake_case table name)
+            - New relation without @@index on foreign key
+            - JSON field used for data that should be queried/filtered (should be a column)
+            - Missing onDelete behavior on relation
+            - Seeds not updated for new system data
+
+            ## Output Format
+            For each issue found, provide:
+            1. **Severity**: 🔴 Critical | 🟡 Warning | 🔵 Suggestion
+            2. **File and line reference**
+            3. **What's wrong**
+            4. **How to fix** (with code example if helpful)
+
+            End with a summary: total issues by severity, overall assessment (✅ Approve / ⚠️ Changes Requested / 🔴 Block).
+
+            IMPORTANT: You MUST return a structured output with your verdict. Use FAIL if any 🔴 Critical issues exist.
+
+          # Tools for comprehensive PR review
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --model claude-sonnet-4-5-20250929
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","FAIL"]},"critical_count":{"type":"integer"},"high_count":{"type":"integer"},"summary":{"type":"string"}},"required":["verdict","critical_count","high_count","summary"]}'
+
+      - name: Check review result
+        run: |
+          OUTPUT='${{ steps.claude-review.outputs.structured_output }}'
+          echo "Review output: $OUTPUT"
+          VERDICT=$(echo "$OUTPUT" | jq -r '.verdict')
+          CRITICAL=$(echo "$OUTPUT" | jq -r '.critical_count')
+          HIGH=$(echo "$OUTPUT" | jq -r '.high_count')
+          SUMMARY=$(echo "$OUTPUT" | jq -r '.summary')
+          echo "Verdict: $VERDICT | Critical: $CRITICAL | High: $HIGH"
+          echo "Summary: $SUMMARY"
+          if [ "$VERDICT" = "FAIL" ]; then
+            echo "❌ Claude review found $CRITICAL critical and $HIGH high severity issues. Blocking merge."
+            exit 1
+          fi
+          echo "✅ Claude review passed."
