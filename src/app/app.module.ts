@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
+import { WorkoutsModule } from '../modules/workouts/workouts.module.js';
 
 @Module({
-  imports: [],
+  imports: [WorkoutsModule],
   controllers: [],
   providers: [],
 })
