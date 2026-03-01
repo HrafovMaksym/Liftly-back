@@ -3,7 +3,11 @@ import prisma from '../../database/prisma.js';
 import { CreateWorkoutInput } from './dto/create-workout.dto.js';
 import { FinishWorkoutInput } from './dto/finish-workout.dto.js';
 import { QueryWorkoutsInput } from './dto/query-workouts.dto.js';
-import { WorkoutStatus } from 'prisma/generated/prisma/client';
+import { Prisma, WorkoutStatus } from 'prisma/generated/prisma/client';
+
+interface VolumeQueryResult {
+  total_volume: number;
+}
 
 const WORKOUT_SELECT = {
   id: true,
@@ -45,26 +49,25 @@ export class WorkoutsService {
       orderBy: { startedAt: 'desc' },
       take: limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      select: WORKOUT_SUMMARY_SELECT,
+      select: {
+        ...WORKOUT_SUMMARY_SELECT,
+        _count: { select: { sets: true } },
+      },
     });
 
     const hasMore = workouts.length > limit;
     const items = workouts.slice(0, limit);
     const nextCursor = hasMore ? items[items.length - 1]?.id ?? null : null;
 
-    // BUG: N+1 query — fetching set count per workout in a loop
-    const workoutsWithSetCount = [];
-    for (const workout of items) {
-      const setCount = await prisma.workoutSet.count({
-        where: { workoutId: workout.id },
-      });
-      workoutsWithSetCount.push({ ...workout, setsCompleted: setCount });
-    }
+    const data = items.map(({ _count, ...workout }) => ({
+      ...workout,
+      setsCompleted: _count.sets,
+    }));
 
-    this.logger.debug(`Fetched ${items.length} workouts for user ${userId}`);
+    this.logger.debug(`Fetched ${data.length} workouts for user ${userId}`);
 
     return {
-      data: workoutsWithSetCount,
+      data,
       meta: { pagination: { nextCursor, hasMore } },
     };
   }
@@ -146,14 +149,14 @@ export class WorkoutsService {
     const durationSeconds = Math.floor((now.getTime() - workout.startedAt.getTime()) / 1000);
 
     // Calculate aggregates from sets
-    const aggregates: any = await prisma.workoutSet.aggregate({
+    const aggregates = await prisma.workoutSet.aggregate({
       where: { workoutId },
       _count: { id: true },
       _sum: { reps: true },
     });
 
     // Calculate total volume via raw query
-    const volumeResult: any[] = await prisma.$queryRaw`
+    const volumeResult = await prisma.$queryRaw<VolumeQueryResult[]>`
       SELECT COALESCE(SUM(weight * reps), 0) as total_volume
       FROM workout_sets
       WHERE workout_id = ${workoutId}::uuid

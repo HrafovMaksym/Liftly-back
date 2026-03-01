@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Post,
-  Patch,
   Delete,
   Body,
   Param,
@@ -94,6 +93,8 @@ export class WorkoutsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a workout' })
   @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, description: 'Workout deleted' })
+  @ApiResponse({ status: 404, description: 'Workout not found' })
   async delete(
     @CurrentUser() userId: string,
     @Param('id', ParseUUIDPipe) id: string,
