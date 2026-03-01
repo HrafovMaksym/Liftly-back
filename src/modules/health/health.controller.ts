@@ -12,11 +12,15 @@ import {
   HealthErrorResponseDto,
   HealthErrorResponseDto2,
 } from './dto/health-error-response.dto.js';
-import prisma from '../../database/prisma.js';
+import { HealthService } from './health.service.js';
+import { Public } from '../../common/decorators/public.decorator.js';
 
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
+  constructor(private readonly healthService: HealthService) {}
+
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Health check' })
   @ApiOkResponse({ description: 'Service is healthy', type: HealthResponseDto })
@@ -29,9 +33,9 @@ export class HealthController {
     type: HealthErrorResponseDto2,
   })
   async check(): Promise<HealthResponseDto> {
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-    } catch {
+    const isHealthy = await this.healthService.isDatabaseHealthy();
+
+    if (!isHealthy) {
       throw new ServiceUnavailableException('Database connection failed');
     }
 
